@@ -1,0 +1,65 @@
+# Copyright 2023 You-Sheng Yang and others
+# SPDX-License-Identifier: Apache-2.0
+# Copying and distribution of this file, with or without modification, are
+# permitted in any medium without royalty provided the copyright notice and
+# this notice are preserved. This file is offered as-is, without any warranty.
+---
+name: 'CI'
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - LICENSE
+      - 'README.*'
+  pull_request:
+    paths-ignore:
+      - LICENSE
+      - 'README.*'
+  schedule:
+    - cron: '30 1 * * 0'
+  workflow_dispatch:
+
+jobs:
+  static-checks:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: 'Install prerequisites'
+        run: |
+          sudo apt-get update --quiet
+          sudo apt-get install --no-install-recommends -y \
+              licensecheck
+
+      - name: 'Check license'
+        run: |
+          PROBLEMS=0
+
+          BAD_FILES=$(licensecheck -r . | grep -Ev '(README.md)'| grep UNKNOWN) || true
+          if [ -n "${BAD_FILES}" ]; then
+            echo "ERROR: Missing license statement in the following files:"
+            echo "$BAD_FILES"
+            PROBLEMS=$(($PROBLEMS + 1))
+          fi
+
+          exit $PROBLEMS
+
+  prune-staging-tags:
+    needs:
+      - static-checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Prune staging images
+        uses: vlaurin/action-ghcr-prune@v0.5.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          organization: ${{ github.repository_owner }}
+          container: 'staging'
+          dry-run: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
+          prune-tags-regexes: '^[0-9]'
+          prune-untagged: true
